@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, AppState,
   ScrollView, ActivityIndicator, Platform,
 } from 'react-native'
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore'
+import { doc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore'
 import * as Haptics from 'expo-haptics'
 import QRCode from 'react-native-qrcode-svg'
 import { db } from '../firebase'
@@ -30,9 +30,15 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
       if (!snap.exists()) { onLeave(); return }
       const data = snap.data()
 
-      // Haptic pulse for everyone when dare screen fires
+      // Triple heavy pulse for everyone when someone loses
       if (data.status === 'dare' && currentStatusRef.current !== 'dare') {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning)
+        ;(async () => {
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+          await new Promise(r => setTimeout(r, 100))
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+          await new Promise(r => setTimeout(r, 100))
+          await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
+        })()
       }
 
       currentStatusRef.current = data.status
@@ -61,13 +67,19 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
       }
 
       if (nextState === 'active' && hasGoneBackgroundRef.current) {
+        if (hasLostRef.current) return
         hasLostRef.current = true
-        updateDoc(doc(db, 'sessions', roomCode), {
-          status: 'dare',
-          loserId: playerId,
-          loserName: playerName,
-          currentDare: pickDare(currentCategoryRef.current),
-        })
+        const sessionRef = doc(db, 'sessions', roomCode)
+        runTransaction(db, async (tx) => {
+          const snap = await tx.get(sessionRef)
+          if (!snap.exists() || snap.data().status !== 'playing') return
+          tx.update(sessionRef, {
+            status: 'dare',
+            loserId: playerId,
+            loserName: playerName,
+            currentDare: pickDare(currentCategoryRef.current),
+          })
+        }).catch(() => { hasLostRef.current = false })
       }
     })
     return () => sub.remove()
