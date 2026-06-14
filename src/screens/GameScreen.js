@@ -5,6 +5,7 @@ import {
 } from 'react-native'
 import { doc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore'
 import * as Haptics from 'expo-haptics'
+import { Audio } from 'expo-av'
 import QRCode from 'react-native-qrcode-svg'
 import { db } from '../firebase'
 import dares from '../dares.json'
@@ -23,6 +24,51 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
   const currentStatusRef = useRef(null)
   const currentCategoryRef = useRef('kids')
   const appStateRef = useRef(AppState.currentState)
+  const soundRef = useRef(null)
+
+  useEffect(() => {
+    Audio.setAudioModeAsync({
+      staysActiveInBackground: true,
+      playsInSilentModeIOS: true,
+    })
+    return () => {
+      if (soundRef.current) {
+        soundRef.current.stopAsync().catch(() => {})
+        soundRef.current.unloadAsync().catch(() => {})
+        soundRef.current = null
+      }
+    }
+  }, [])
+
+  async function stopAudio() {
+    if (soundRef.current) {
+      try {
+        await soundRef.current.stopAsync()
+        await soundRef.current.unloadAsync()
+      } catch {}
+      soundRef.current = null
+    }
+  }
+
+  async function startSilentLoop() {
+    await stopAudio()
+    const { sound } = await Audio.Sound.createAsync(
+      require('../../assets/silent.wav'),
+      { isLooping: true, volume: 0 }
+    )
+    soundRef.current = sound
+    await sound.playAsync()
+  }
+
+  async function playAlarm() {
+    await stopAudio()
+    const { sound } = await Audio.Sound.createAsync(
+      require('../../assets/alarm.wav'),
+      { isLooping: false, volume: 1 }
+    )
+    soundRef.current = sound
+    await sound.playAsync()
+  }
 
   // Firebase listener
   useEffect(() => {
@@ -30,8 +76,15 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
       if (!snap.exists()) { onLeave(); return }
       const data = snap.data()
 
-      // Triple heavy pulse for everyone when someone loses
+      if (data.status === 'playing' && currentStatusRef.current !== 'playing') {
+        startSilentLoop()
+        hasLostRef.current = false
+        hasGoneBackgroundRef.current = false
+      }
+
+      // Triple heavy pulse + alarm for everyone when someone loses
       if (data.status === 'dare' && currentStatusRef.current !== 'dare') {
+        playAlarm()
         ;(async () => {
           await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy)
           await new Promise(r => setTimeout(r, 100))
@@ -41,13 +94,12 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
         })()
       }
 
+      if (data.status === 'lobby' && currentStatusRef.current !== 'lobby') {
+        stopAudio()
+      }
+
       currentStatusRef.current = data.status
       currentCategoryRef.current = data.category || 'kids'
-
-      if (data.status === 'playing') {
-        hasLostRef.current = false
-        hasGoneBackgroundRef.current = false
-      }
 
       setSession(data)
       setLoading(false)
