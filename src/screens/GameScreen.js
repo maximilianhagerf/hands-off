@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import {
   View, Text, TouchableOpacity, StyleSheet, AppState,
-  ScrollView, ActivityIndicator, Platform,
+  ScrollView, ActivityIndicator, Platform, NativeModules,
 } from 'react-native'
 import { doc, onSnapshot, runTransaction, updateDoc } from 'firebase/firestore'
 import * as Haptics from 'expo-haptics'
@@ -37,8 +37,11 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
         soundRef.current.unloadAsync().catch(() => {})
         soundRef.current = null
       }
+      if (Platform.OS === 'android') NativeModules.ForegroundServiceModule?.stop()
     }
   }, [])
+
+  const { ForegroundServiceModule } = NativeModules
 
   async function stopAudio() {
     if (soundRef.current) {
@@ -48,10 +51,12 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
       } catch {}
       soundRef.current = null
     }
+    if (Platform.OS === 'android') ForegroundServiceModule?.stop()
   }
 
   async function startSilentLoop() {
     await stopAudio()
+    if (Platform.OS === 'android') ForegroundServiceModule?.start()
     const { sound } = await Audio.Sound.createAsync(
       require('../../assets/silent.wav'),
       { isLooping: true, volume: 0 }
@@ -63,7 +68,7 @@ export default function GameScreen({ roomCode, playerId, playerName, onLeave }) 
   async function playAlarm() {
     await stopAudio()
     const { sound } = await Audio.Sound.createAsync(
-      require('../../assets/alarm.wav'),
+      require('../../assets/alarm2.mp3'),
       { isLooping: false, volume: 1 }
     )
     soundRef.current = sound
