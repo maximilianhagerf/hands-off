@@ -12,6 +12,12 @@
         {
           "microphonePermission": false
         }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Scan a room QR code to join a game"
+        }
       ]
     ],
     "ios": {

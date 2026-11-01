@@ -1,10 +1,11 @@
 import { useState } from 'react'
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Modal,
 } from 'react-native'
 import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore'
 import { db } from '../firebase'
+import { CameraView, useCameraPermissions } from 'expo-camera'
 
 function generateRoomCode() {
   return Math.random().toString(36).substring(2, 8).toUpperCase()
@@ -15,6 +16,9 @@ export default function HomeScreen({ playerName, onNameSave, playerId, onEnterRo
   const [joinCode, setJoinCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const [showScanner, setShowScanner] = useState(false)
+  const [scanned, setScanned] = useState(false)
+  const [permission, requestPermission] = useCameraPermissions()
 
   async function createRoom() {
     if (!name.trim()) return setError('Enter your name first')
@@ -36,12 +40,12 @@ export default function HomeScreen({ playerName, onNameSave, playerId, onEnterRo
     onEnterRoom(roomCode)
   }
 
-  async function joinRoom() {
+  async function joinRoom(overrideCode) {
     if (!name.trim()) return setError('Enter your name first')
-    if (!joinCode.trim()) return setError('Enter room code')
+    const code = (overrideCode ?? joinCode).trim().toUpperCase()
+    if (!code) return setError('Enter room code')
     setLoading(true)
     setError('')
-    const code = joinCode.trim().toUpperCase()
     await onNameSave(name.trim())
     const snap = await getDoc(doc(db, 'sessions', code))
     if (!snap.exists()) {
@@ -54,6 +58,23 @@ export default function HomeScreen({ playerName, onNameSave, playerId, onEnterRo
     })
     setLoading(false)
     onEnterRoom(code)
+  }
+
+  async function handleScanPress() {
+    if (!name.trim()) return setError('Enter your name first')
+    if (!permission?.granted) {
+      const result = await requestPermission()
+      if (!result.granted) return setError('Camera permission required to scan')
+    }
+    setScanned(false)
+    setShowScanner(true)
+  }
+
+  function handleBarcodeScanned({ data }) {
+    if (scanned) return
+    setScanned(true)
+    setShowScanner(false)
+    joinRoom(data.trim().toUpperCase())
   }
 
   return (
@@ -109,8 +130,16 @@ export default function HomeScreen({ playerName, onNameSave, playerId, onEnterRo
             autoCorrect={false}
           />
           <TouchableOpacity
+            style={[s.btnScan, loading && s.btnDisabled]}
+            onPress={handleScanPress}
+            disabled={loading}
+            activeOpacity={0.8}
+          >
+            <Text style={s.btnScanText}>📷</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
             style={[s.btnJoin, loading && s.btnDisabled]}
-            onPress={joinRoom}
+            onPress={() => joinRoom()}
             disabled={loading}
             activeOpacity={0.8}
           >
@@ -118,6 +147,23 @@ export default function HomeScreen({ playerName, onNameSave, playerId, onEnterRo
           </TouchableOpacity>
         </View>
       </View>
+
+      <Modal visible={showScanner} animationType="slide" onRequestClose={() => setShowScanner(false)}>
+        <View style={s.scannerContainer}>
+          <CameraView
+            style={StyleSheet.absoluteFill}
+            facing="back"
+            barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
+            onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
+          />
+          <View style={s.scannerOverlay}>
+            <Text style={s.scannerLabel}>Point at the room QR code</Text>
+            <TouchableOpacity style={s.btnCancel} onPress={() => setShowScanner(false)}>
+              <Text style={s.btnCancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </KeyboardAvoidingView>
   )
 }
@@ -159,6 +205,14 @@ const s = StyleSheet.create({
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     marginBottom: 0,
   },
+  btnScan: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  btnScanText: { fontSize: 18 },
   btnJoin: {
     backgroundColor: '#3f3f46',
     borderRadius: 12,
@@ -167,4 +221,20 @@ const s = StyleSheet.create({
     alignItems: 'center',
   },
   btnJoinText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  scannerContainer: { flex: 1, backgroundColor: '#000' },
+  scannerOverlay: {
+    position: 'absolute',
+    bottom: 48,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
+  },
+  scannerLabel: { color: '#fff', fontSize: 16, marginBottom: 20, opacity: 0.8 },
+  btnCancel: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 32,
+    paddingVertical: 14,
+  },
+  btnCancelText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 })
